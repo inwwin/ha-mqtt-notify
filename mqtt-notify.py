@@ -11,10 +11,11 @@
 
 import argparse
 import configparser
-import re
 import signal
 import sys
 import time
+import json
+from bidict import bidict
 import paho.mqtt.client as mqtt
 import gi
 gi.require_version('Notify', '0.7')
@@ -24,11 +25,8 @@ from gi.repository import GLib, Notify, Secret
 from dbus.mainloop.glib import DBusGMainLoop
 DBusGMainLoop(set_as_default=True)
 
-chan_msg = re.compile(r'\[(?P<channel>#.*?)\]\n<\s*(?P<nick>.*?)> \| (?P<msg>.*)')
-priv_msg = re.compile(r'\(PM: (?P<nick>.*?)\)\n(?P<msg>.*)')
-subj_fmt = re.compile(r'IRC message (on|from) (?P<key>.*)')
-
-notification_map = {}
+notification_map = bidict()
+icon = None
 
 class Signaler:
     def __init__(self, loop):
@@ -42,48 +40,51 @@ def on_connect(client, userdata, flags, rc):
 
     # Subscribing in on_connect() means that if we lose the connection and
     # reconnect then subscriptions will be renewed.
-    client.subscribe(userdata)
+    client.subscribe(userdata, qos=2)
 
 def on_close(notification):
-    key = ''
-    if (m := subj_fmt.match(notification.props.summary)) is not None:
-        key = m.group('key')
-
-    if key in notification_map:
-        for i in notification_map[key]:
-            if i is not notification:
-                i.close()
-        del notification_map[key]
+    del notification_map.inverse[notification]
 
 def on_message(client, userdata, msg):
-    icon = '/usr/share/icons/HighContrast/scalable/apps-extra/internet-group-chat.svg'
-    message = msg.payload.decode('utf-8')
+    global icon
+    payload_raw = msg.payload.decode('utf-8')
+    print(f"Handling payload <{payload_raw}>")
+    try:
+        payload = json.loads(payload_raw)
+    except json.JSONDecodeError:
+        print(f"Payload <{payload_raw}> is not a valid json")
+        return
 
-    if (m := re.match(chan_msg, message)) is not None:
-        subject = 'IRC message on {}'.format(m.group('channel'))
-        body = '<{}> {}'.format(m.group('nick'), m.group('msg'))
-        key = m.group('channel')
-    if (m := re.match(priv_msg, message)) is not None:
-        subject = 'IRC message from {}'.format(m.group('nick'))
-        body = '<{}> {}'.format(m.group('nick'), m.group('msg'))
-        key = m.group('nick')
+    payload: dict
+    for key in ('title', 'message', 'tag', 'category', 'timeout', 'urgency'):
+        payload.setdefault(key, None)
+    if payload['message'] is None:
+        return
+
+    if payload['title'] is not None:
+        summary = payload['title']
+        body = payload['message']
     else:
-        subject = 'IRC'
-        body = message
-        key = ''
+        summary = payload['message']
+        body = None
 
-    if key not in notification_map or len(notification_map[key]) == 1:
-        n = Notify.Notification.new(subject, body, icon)
-        n.set_category('im.received')
-        n.connect('closed', on_close)
-
-        if key not in notification_map:
-            notification_map[key] = [n]
+    if (tag := payload['tag']) is not None:
+        if tag in notification_map:
+            n = notification_map[tag]
+            n.update(summary, body, icon)
         else:
-            notification_map[key].append(n)
+            n = Notify.Notification.new(summary, body, icon)
+            notification_map[tag] = n
     else:
-        n = notification_map[key][1]
-        n.update(subject, body, icon)
+        n = Notify.Notification.new(summary, body, icon)
+
+    n: Notify.Notification
+    if payload['category'] is not None:
+        n.set_category(payload['category'])
+    if payload['timeout'] is not None:
+        n.set_timeout(payload['timeout'])
+    if payload['urgency'] is not None:
+        n.set_urgency(Notify.Urgency(payload['urgency']))
 
     n.show()
 
@@ -94,7 +95,8 @@ def password(user, host):
     # Insert password with secret-tool(1). E.g.,
     #   secret-tool store --label="mqtts://example.com" user myuser service mqtt host example.com
 
-    schema = Secret.Schema.new("org.freedesktop.Secret.Generic",
+    schema = Secret.Schema.new(
+        "org.freedesktop.Secret.Generic",
         Secret.SchemaFlags.NONE,
         {
             "user": Secret.SchemaAttributeType.STRING,
@@ -113,23 +115,22 @@ def password(user, host):
     return pw
 
 def config(filename):
-    try:
-        with open(filename) as file:
-            config = configparser.ConfigParser()
-            config.read_file(file)
+    with open(filename) as file:
+        config = configparser.ConfigParser()
+        config.read_file(file)
 
-            cfg = config[configparser.DEFAULTSECT]
-            broker = cfg['broker']
-            topic = cfg['topic']
-            port = int(cfg['port'])
-            user = cfg['user']
+        cfg = config[configparser.DEFAULTSECT]
+        broker = cfg['broker']
+        topic = cfg['topic']
+        port = int(cfg['port'])
+        user = cfg['user']
+        icon = cfg.get('icon')
+        insecure = bool(cfg.get('insecure', False))
 
-            return user, broker, port, topic
-    except:
-        print("Failed to parse {}".format(filename), file=sys.stderr)
-        sys.exit(-1)
+        return user, broker, port, topic, icon, insecure
 
 def main(argv):
+    global icon
     loop = GLib.MainLoop()
 
     do = Signaler(loop)
@@ -141,12 +142,13 @@ def main(argv):
         type=argparse.FileType('r'), required=True)
     args = parser.parse_args()
 
-    user, broker, port, topic = config(args.config.name)
+    user, broker, port, topic, icon, insecure = config(args.config.name)
 
-    Notify.init('MQTT to Notify bridge')
+    Notify.init('Home Assistant')
     client = mqtt.Client(userdata=topic)
 
     client.tls_set()
+    client.tls_insecure_set(insecure)
     client.username_pw_set(user, password(user, broker))
     client.on_connect = on_connect
     client.on_message = on_message
