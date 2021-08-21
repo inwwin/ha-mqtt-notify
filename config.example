@@ -1,5 +1,7 @@
 [DEFAULT]
 broker = example.com
 port = 8883
-topic = irssi/#
+topic = computer/inwwin-surface/notify
 user = myuser
+icon = <FULL_PATH_TO_HOMEASSISTANT_ICON>
+insecure = False

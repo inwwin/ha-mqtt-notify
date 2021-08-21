@@ -19,8 +19,8 @@ MQTT to Desktop Notification script, for using with Home Assistant [MQTT Notific
 ### Installation
 
 ```sh
-$ mkdir -p ~/bin
-$ cp mqtt-notify.py ~/bin
+$ mkdir -p ~/.local/bin
+$ cp mqtt-notify.py ~/.local/bin
 $ mkdir -p ~/.config/systemd/user/
 $ cp mqtt-notify.service ~/.config/systemd/user/
 ```
@@ -30,7 +30,7 @@ $ cp mqtt-notify.service ~/.config/systemd/user/
 A simple example configuration file is available at `config`. Copy and modify to suit your needs.
 ```sh
 $ mkdir -p  ~/.config/mqtt-notify/
-$ cp config ~/.config/mqtt-notify/
+$ cp config.example ~/.config/mqtt-notify/config
 ```
 
 #### Password
@@ -41,16 +41,30 @@ $ secret-tool store --label="mqtts://example.com" user myuser service mqtt host 
 Password: **********
 ```
 
+### Home Assistant configuration
+Use the example script provided in the file ha-script.yaml
+
+
 ### Usage
-#### As a user service
+#### On the client
+##### As a user service
 ```sh
 $ systemctl --user daemon-reload
 $ systemctl --user enable --now mqtt-notify
 ```
 
-#### Manual
-(Assumes that `~/bin` is in your `$PATH`)
+##### Manual
+(Assumes that `~/.local/bin` is in your `$PATH`)
 
 ```sh
 $ mqtt-notify.py -c ~/.config/mqtt-notify/config
+```
+
+#### On Home Assistant
+Invoke the notification using this service call
+
+```yaml
+service: script.notify_linux_desktop
+data:
+  message: Hello World
 ```

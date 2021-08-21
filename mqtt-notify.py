@@ -48,7 +48,7 @@ def on_close(notification):
 def on_message(client, userdata, msg):
     global icon
     payload_raw = msg.payload.decode('utf-8')
-    print(f"Handling payload <{payload_raw}>")
+    #print(f"Handling payload <{payload_raw}>")
     try:
         payload = json.loads(payload_raw)
     except json.JSONDecodeError:

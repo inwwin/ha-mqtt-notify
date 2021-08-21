@@ -1,0 +1,65 @@
+# The content of this file goes into your scripts.yaml file on Home Assistant
+notify_linux_desktop: # change this to your liking
+  alias: "Send a notification to my Linux desktop"
+  icon: mdi:bell-ring
+  fields:
+    title:
+      description: "The title of the notification"
+      example: "State change"
+      required: false
+      selector:
+        text:
+    message:
+      description: "The message content"
+      example: "The light is on!"
+      required: true
+      selector:
+        text:
+    tag:
+      description: "Tag the notification so that it can be replaced"
+      required: false
+      selector:
+        text:
+    timeout:
+      description: >
+        Notification timeout in milliseconds,
+        '0' for infinite and
+        '-1' for the default behaviour of the desktop notification server
+      required: false
+      default: -1
+      selector:
+        number:
+          min: -1
+          max: 60000
+          unit_of_measurement: ms
+          mode: box
+    category:
+      required: false
+      selector:
+        text:
+    urgency:
+      required: false
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 2
+  mode: queued
+  sequence:
+    - service: mqtt.publish
+      data:
+        topic: "computer/linux-desktop/notify" # Change this to your liking, must be the same as in the config file
+        qos: 2
+        retain: false
+        payload_template: >
+          {%
+            set payload = {
+              'title': title if title else None,
+              'message': message,
+              'tag': tag if tag else None,
+              'timeout': timeout if timeout else None,
+              'category': category if category else None,
+              'urgency': urgency if urgency else None
+            } 
+          %}
+          {{ payload|to_json }}
