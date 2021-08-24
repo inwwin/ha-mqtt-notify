@@ -1,5 +1,5 @@
 [Unit]
-Description=MQTT to libnotify IRC notifications
+Description=Home Assistant notifications via MQTT protocol
 After=network-online.target nss-lookup.target
 Wants=network-online.target nss-lookup.target
 
